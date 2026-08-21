@@ -89,8 +89,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               properties: {
                 translations: {
                   type: 'array',
-                  minItems: sentences.length,
-                  maxItems: sentences.length,
                   items: { type: 'string' },
                 },
               },
