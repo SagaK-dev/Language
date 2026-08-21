@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { extractArticle, translateSentences } from './lib/api';
 import { createSeed, mixPairs, toggleSentence } from './lib/mix';
 import { flattenSentences } from './lib/sentences';
 import { clearHistory, loadHistory, saveHistory } from './lib/storage';
 import type { HistoryEntry, MixedSentence, SentencePair, TranslationOptions } from './types';
 
+const MAX_TEXT_LENGTH = 5000;
+const MAX_SENTENCES = 120;
 const EXAMPLE = `朝は少し早く起きて、近所を散歩しました。空気が涼しくて気持ちよかったです。\n\n帰宅してからコーヒーを入れ、今日やることを三つだけメモしました。全部を完璧に終わらせるより、大切なことから始めることにしました。`;
 
 const languageOptions = [
-  'English', 'Japanese', 'Chinese', 'Korean', 'French', 'German', 'Spanish', 'Italian', 'Portuguese', 'Hindi', 'Vietnamese', 'Thai',
+  'English', 'Japanese', 'Chinese', 'Korean', 'French', 'German',
+  'Spanish', 'Italian', 'Portuguese', 'Hindi', 'Vietnamese', 'Thai',
 ];
 
 const initialOptions: TranslationOptions = {
@@ -40,14 +43,42 @@ function App() {
     return [...map.entries()].sort((a, b) => a[0] - b[0]);
   }, [mixed]);
 
+  useEffect(() => {
+    if (!historyOpen && !articleOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || loading) return;
+      setHistoryOpen(false);
+      setArticleOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [articleOpen, historyOpen, loading]);
+
+  function invalidateResult(): void {
+    setPairs([]);
+    setMixed([]);
+  }
+
+  function updateText(next: string): void {
+    setText(next);
+    invalidateResult();
+    setMessage(null);
+  }
+
+  function updateOptions(patch: Partial<TranslationOptions>): void {
+    setOptions((current) => ({ ...current, ...patch }));
+    invalidateResult();
+    setMessage(null);
+  }
+
   async function handleMix() {
     const trimmed = text.trim();
     if (!trimmed) {
       setMessage('文章を入力してください。');
       return;
     }
-    if (trimmed.length > 5000) {
-      setMessage('文章は5000文字以内にしてください。');
+    if (trimmed.length > MAX_TEXT_LENGTH) {
+      setMessage(`文章は${MAX_TEXT_LENGTH}文字以内にしてください。`);
       return;
     }
     if (options.sourceLanguage === options.targetLanguage) {
@@ -56,14 +87,22 @@ function App() {
     }
 
     const units = flattenSentences(trimmed);
-    if (units.length === 0) return;
+    if (units.length === 0) {
+      setMessage('文章を文として認識できませんでした。');
+      return;
+    }
+    if (units.length > MAX_SENTENCES) {
+      setMessage(`一度に処理できるのは${MAX_SENTENCES}文までです。文章を短くしてください。`);
+      return;
+    }
 
     setLoading(true);
     setMessage(null);
     try {
       const translated = await translateSentences(units.map((item) => item.text), options);
+      const batchId = crypto.randomUUID();
       const nextPairs = units.map((item, index) => ({
-        id: `${Date.now()}-${index}`,
+        id: `${batchId}:${index}`,
         source: item.text,
         translated: translated[index],
         paragraphIndex: item.paragraphIndex,
@@ -75,15 +114,19 @@ function App() {
       setMixed(mixPairs(nextPairs, ratio, nextSeed));
 
       const entry: HistoryEntry = {
-        id: crypto.randomUUID(),
+        id: batchId,
         createdAt: new Date().toISOString(),
         title: trimmed.slice(0, 44),
         sourceText: trimmed,
         ratio,
-        options,
+        options: { ...options },
         pairs: nextPairs,
       };
-      setHistory(saveHistory(entry));
+      const saved = saveHistory(entry);
+      setHistory(saved.entries);
+      if (!saved.persisted) {
+        setMessage('翻訳は完了しましたが、この端末に履歴を保存できませんでした。');
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '翻訳に失敗しました。');
     } finally {
@@ -106,24 +149,43 @@ function App() {
   function restoreHistory(entry: HistoryEntry) {
     setText(entry.sourceText);
     setRatio(entry.ratio);
-    setOptions(entry.options);
+    setOptions({ ...entry.options });
     setPairs(entry.pairs);
     const nextSeed = createSeed();
     setSeed(nextSeed);
     setMixed(mixPairs(entry.pairs, entry.ratio, nextSeed));
+    setMessage(null);
     setHistoryOpen(false);
   }
 
+  function removeAllHistory() {
+    if (clearHistory()) {
+      setHistory([]);
+      return;
+    }
+    setMessage('履歴を削除できませんでした。ブラウザのストレージ設定を確認してください。');
+  }
+
+  function closeArticleModal() {
+    if (!loading) setArticleOpen(false);
+  }
+
   async function importArticle() {
-    if (!articleUrl.trim()) return;
+    const requestedUrl = articleUrl.trim();
+    if (!requestedUrl) return;
     setLoading(true);
     setMessage(null);
     try {
-      const article = await extractArticle(articleUrl.trim());
-      setText(article.text.slice(0, 5000));
+      const article = await extractArticle(requestedUrl);
+      const wasTruncated = article.text.length > MAX_TEXT_LENGTH;
+      updateText(article.text.slice(0, MAX_TEXT_LENGTH));
       setArticleOpen(false);
       setArticleUrl('');
-      setMessage(`「${article.title}」を読み込みました。`);
+      setMessage(
+        wasTruncated
+          ? `「${article.title}」を読み込み、先頭${MAX_TEXT_LENGTH}文字を使用しました。`
+          : `「${article.title}」を読み込みました。`,
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '記事の読み込みに失敗しました。');
     } finally {
@@ -134,7 +196,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="ghost" onClick={() => setHistoryOpen(true)}>履歴</button>
+        <button type="button" className="ghost" onClick={() => setHistoryOpen(true)} disabled={loading}>履歴</button>
         <a className="brand" href="#top" aria-label="Language home">
           <span className="brand-mark">L</span>
           <span>Language</span>
@@ -155,32 +217,34 @@ function App() {
               <span className="step">01</span>
               <h2>読みたい文章</h2>
             </div>
-            <span className={text.length > 5000 ? 'counter danger' : 'counter'}>{text.length} / 5000</span>
+            <span className="counter">{text.length} / {MAX_TEXT_LENGTH}</span>
           </div>
 
           <textarea
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => updateText(event.target.value)}
             placeholder="ニュース、メモ、勉強したい文章などを貼り付けてください…"
             rows={11}
+            maxLength={MAX_TEXT_LENGTH}
+            disabled={loading}
           />
 
           <div className="toolbar">
-            <button className="soft" onClick={() => setText(EXAMPLE)}>📄 例文を入れる</button>
-            <button className="soft" onClick={() => setArticleOpen(true)}>📰 記事URLから読み込む</button>
-            <button className="text-button" onClick={() => setText('')}>クリア</button>
+            <button type="button" className="soft" onClick={() => updateText(EXAMPLE)} disabled={loading}>📄 例文を入れる</button>
+            <button type="button" className="soft" onClick={() => setArticleOpen(true)} disabled={loading}>📰 記事URLから読み込む</button>
+            <button type="button" className="text-button" onClick={() => updateText('')} disabled={loading || !text}>クリア</button>
           </div>
 
           <div className="grid two">
             <label>
               <span>元の言語</span>
-              <select value={options.sourceLanguage} onChange={(e) => setOptions({ ...options, sourceLanguage: e.target.value })}>
+              <select value={options.sourceLanguage} onChange={(e) => updateOptions({ sourceLanguage: e.target.value })} disabled={loading}>
                 {languageOptions.map((language) => <option key={language}>{language}</option>)}
               </select>
             </label>
             <label>
               <span>学習言語</span>
-              <select value={options.targetLanguage} onChange={(e) => setOptions({ ...options, targetLanguage: e.target.value })}>
+              <select value={options.targetLanguage} onChange={(e) => updateOptions({ targetLanguage: e.target.value })} disabled={loading}>
                 {languageOptions.map((language) => <option key={language}>{language}</option>)}
               </select>
             </label>
@@ -192,7 +256,14 @@ function App() {
               <span>話者</span>
               <div className="segmented">
                 {(['neutral', 'female', 'male'] as const).map((value) => (
-                  <button key={value} className={options.speakerGender === value ? 'active' : ''} onClick={() => setOptions({ ...options, speakerGender: value })}>
+                  <button
+                    type="button"
+                    key={value}
+                    className={options.speakerGender === value ? 'active' : ''}
+                    aria-pressed={options.speakerGender === value}
+                    disabled={loading}
+                    onClick={() => updateOptions({ speakerGender: value })}
+                  >
                     {value === 'neutral' ? '指定なし' : value === 'female' ? '女性' : '男性'}
                   </button>
                 ))}
@@ -202,7 +273,14 @@ function App() {
               <span>丁寧さ</span>
               <div className="segmented">
                 {(['natural', 'polite', 'casual'] as const).map((value) => (
-                  <button key={value} className={options.politeness === value ? 'active' : ''} onClick={() => setOptions({ ...options, politeness: value })}>
+                  <button
+                    type="button"
+                    key={value}
+                    className={options.politeness === value ? 'active' : ''}
+                    aria-pressed={options.politeness === value}
+                    disabled={loading}
+                    onClick={() => updateOptions({ politeness: value })}
+                  >
                     {value === 'natural' ? '自然' : value === 'polite' ? '丁寧' : 'カジュアル'}
                   </button>
                 ))}
@@ -212,7 +290,14 @@ function App() {
               <span>相手</span>
               <div className="segmented">
                 {(['general', 'senior', 'friend'] as const).map((value) => (
-                  <button key={value} className={options.audience === value ? 'active' : ''} onClick={() => setOptions({ ...options, audience: value })}>
+                  <button
+                    type="button"
+                    key={value}
+                    className={options.audience === value ? 'active' : ''}
+                    aria-pressed={options.audience === value}
+                    disabled={loading}
+                    onClick={() => updateOptions({ audience: value })}
+                  >
                     {value === 'general' ? '一般' : value === 'senior' ? '目上' : '友達'}
                   </button>
                 ))}
@@ -220,7 +305,13 @@ function App() {
             </div>
             <label>
               <span>補足</span>
-              <input value={options.context} onChange={(e) => setOptions({ ...options, context: e.target.value })} placeholder="例: ビジネスメール。話者は女性、相手は上司。" maxLength={300} />
+              <input
+                value={options.context}
+                onChange={(e) => updateOptions({ context: e.target.value })}
+                placeholder="例: ビジネスメール。話者は女性、相手は上司。"
+                maxLength={300}
+                disabled={loading}
+              />
             </label>
           </details>
 
@@ -233,14 +324,24 @@ function App() {
               </div>
               <strong>{ratio}%</strong>
             </div>
-            <input className="range" type="range" min="0" max="100" step="10" value={ratio} onChange={(e) => changeRatio(Number(e.target.value))} />
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="100"
+              step="10"
+              value={ratio}
+              aria-label="学習言語の割合"
+              disabled={loading}
+              onChange={(e) => changeRatio(Number(e.target.value))}
+            />
             <div className="ratio-labels"><span>元の言語</span><span>{options.targetLanguage}</span></div>
           </div>
 
-          <button className="primary" onClick={handleMix} disabled={loading || !text.trim()}>
+          <button type="button" className="primary" onClick={handleMix} disabled={loading || !text.trim()}>
             {loading ? '処理中…' : 'ミックスする'}
           </button>
-          {message && <p className="message" role="status">{message}</p>}
+          {message && <p className="message" role="status" aria-live="polite">{message}</p>}
         </section>
 
         {mixed.length > 0 && (
@@ -250,9 +351,9 @@ function App() {
                 <span className="step">03</span>
                 <h2>ミックス文</h2>
               </div>
-              <button className="soft" onClick={() => remix()}>🔀 混ぜ直す</button>
+              <button type="button" className="soft" onClick={() => remix()} disabled={loading}>🔀 混ぜ直す</button>
             </div>
-            <p className="hint">色の付いた文をクリックすると、原文と訳文を切り替えられます。</p>
+            <p className="hint">各文をクリックすると、原文と訳文を切り替えられます。</p>
             <article className="reader">
               {grouped.map(([paragraphIndex, sentences]) => (
                 <p key={paragraphIndex}>
@@ -263,6 +364,7 @@ function App() {
                       key={item.id}
                       onClick={() => setMixed((current) => toggleSentence(current, item.id))}
                       title="クリックで原文/訳文を切り替え"
+                      aria-label={`${item.showTranslation ? '訳文' : '原文'}: ${item.showTranslation ? item.translated : item.source}`}
                     >
                       {item.showTranslation ? item.translated : item.source}
                     </button>
@@ -279,34 +381,61 @@ function App() {
           <div className="benefit-grid">
             <article><span>01</span><h3>文脈がヒントになる</h3><p>知らない表現が出ても、前後の原文から意味を推測しやすくなります。</p></article>
             <article><span>02</span><h3>量を読みやすい</h3><p>難しい文章を100%外国語にせず、読む総量を増やせます。</p></article>
-            <article><span>03</span><h3>負荷をすぐ変更</h3><p>10%から100%まで、集中力や学習段階に合わせて切り替えられます。</p></article>
+            <article><span>03</span><h3>負荷をすぐ変更</h3><p>0%から100%まで、集中力や学習段階に合わせて切り替えられます。</p></article>
           </div>
         </section>
       </main>
 
       {historyOpen && (
         <div className="modal-backdrop" onMouseDown={() => setHistoryOpen(false)}>
-          <aside className="drawer" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="drawer-head"><h2>履歴</h2><button className="icon" onClick={() => setHistoryOpen(false)}>×</button></div>
+          <aside
+            className="drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-head">
+              <h2 id="history-title">履歴</h2>
+              <button type="button" className="icon" aria-label="履歴を閉じる" onClick={() => setHistoryOpen(false)}>×</button>
+            </div>
             <p className="muted">この端末の localStorage にのみ保存されます。</p>
             {history.length === 0 ? <p className="empty">まだ履歴はありません。</p> : history.map((entry) => (
-              <button className="history-item" key={entry.id} onClick={() => restoreHistory(entry)}>
+              <button type="button" className="history-item" key={entry.id} onClick={() => restoreHistory(entry)}>
                 <strong>{entry.title}</strong>
                 <span>{new Date(entry.createdAt).toLocaleString('ja-JP')} · {entry.options.targetLanguage} {entry.ratio}%</span>
               </button>
             ))}
-            {history.length > 0 && <button className="danger-button" onClick={() => { clearHistory(); setHistory([]); }}>履歴をすべて削除</button>}
+            {history.length > 0 && <button type="button" className="danger-button" onClick={removeAllHistory}>履歴をすべて削除</button>}
           </aside>
         </div>
       )}
 
       {articleOpen && (
-        <div className="modal-backdrop" onMouseDown={() => setArticleOpen(false)}>
-          <div className="modal" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="drawer-head"><h2>記事URLを読み込む</h2><button className="icon" onClick={() => setArticleOpen(false)}>×</button></div>
+        <div className="modal-backdrop" onMouseDown={closeArticleModal}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="article-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-head">
+              <h2 id="article-title">記事URLを読み込む</h2>
+              <button type="button" className="icon" aria-label="記事URL画面を閉じる" onClick={closeArticleModal} disabled={loading}>×</button>
+            </div>
             <p className="muted">公開されている http/https ページから本文候補を抽出します。サイト側の制限により取得できない場合があります。</p>
-            <input type="url" placeholder="https://example.com/article" value={articleUrl} onChange={(e) => setArticleUrl(e.target.value)} />
-            <button className="primary" onClick={importArticle} disabled={loading || !articleUrl.trim()}>読み込む</button>
+            <input
+              type="url"
+              placeholder="https://example.com/article"
+              value={articleUrl}
+              onChange={(e) => setArticleUrl(e.target.value)}
+              maxLength={2048}
+              disabled={loading}
+            />
+            <button type="button" className="primary" onClick={importArticle} disabled={loading || !articleUrl.trim()}>
+              {loading ? '読み込み中…' : '読み込む'}
+            </button>
           </div>
         </div>
       )}
