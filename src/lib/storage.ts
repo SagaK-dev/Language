@@ -1,7 +1,16 @@
-import type { HistoryEntry } from '../types';
+import type { HistoryEntry, SentencePair, TranslationOptions } from '../types';
 
 const HISTORY_KEY = 'language.history.v1';
 const MAX_HISTORY = 30;
+const ALLOWED_LANGUAGES = new Set([
+  'English', 'Japanese', 'Chinese', 'Korean', 'French', 'German',
+  'Spanish', 'Italian', 'Portuguese', 'Hindi', 'Vietnamese', 'Thai',
+]);
+
+export interface HistorySaveResult {
+  entries: HistoryEntry[];
+  persisted: boolean;
+}
 
 export function loadHistory(): HistoryEntry[] {
   try {
@@ -15,24 +24,65 @@ export function loadHistory(): HistoryEntry[] {
   }
 }
 
-export function saveHistory(entry: HistoryEntry): HistoryEntry[] {
-  const next = [entry, ...loadHistory().filter((item) => item.id !== entry.id)].slice(0, MAX_HISTORY);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-  return next;
+export function saveHistory(entry: HistoryEntry): HistorySaveResult {
+  const current = loadHistory();
+  const next = [entry, ...current.filter((item) => item.id !== entry.id)].slice(0, MAX_HISTORY);
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    return { entries: next, persisted: true };
+  } catch {
+    return { entries: current, persisted: false };
+  }
 }
 
-export function clearHistory(): void {
-  localStorage.removeItem(HISTORY_KEY);
+export function clearHistory(): boolean {
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function isHistoryEntry(value: unknown): value is HistoryEntry {
+export function isHistoryEntry(value: unknown): value is HistoryEntry {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<HistoryEntry>;
+  if (
+    typeof candidate.id !== 'string' || candidate.id.length === 0 || candidate.id.length > 100 ||
+    typeof candidate.createdAt !== 'string' || Number.isNaN(Date.parse(candidate.createdAt)) ||
+    typeof candidate.title !== 'string' || candidate.title.length > 100 ||
+    typeof candidate.sourceText !== 'string' || candidate.sourceText.length === 0 || candidate.sourceText.length > 5000 ||
+    !Number.isFinite(candidate.ratio) || candidate.ratio! < 0 || candidate.ratio! > 100 ||
+    !isTranslationOptions(candidate.options) ||
+    !Array.isArray(candidate.pairs) || candidate.pairs.length === 0 || candidate.pairs.length > 120
+  ) {
+    return false;
+  }
+  return candidate.pairs.every(isSentencePair);
+}
+
+function isTranslationOptions(value: unknown): value is TranslationOptions {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<TranslationOptions>;
   return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.createdAt === 'string' &&
-    typeof candidate.sourceText === 'string' &&
-    typeof candidate.ratio === 'number' &&
-    Array.isArray(candidate.pairs)
+    ALLOWED_LANGUAGES.has(candidate.sourceLanguage || '') &&
+    ALLOWED_LANGUAGES.has(candidate.targetLanguage || '') &&
+    candidate.sourceLanguage !== candidate.targetLanguage &&
+    ['neutral', 'female', 'male'].includes(candidate.speakerGender || '') &&
+    ['natural', 'polite', 'casual'].includes(candidate.politeness || '') &&
+    ['general', 'senior', 'friend'].includes(candidate.audience || '') &&
+    typeof candidate.context === 'string' && candidate.context.length <= 300
+  );
+}
+
+function isSentencePair(value: unknown): value is SentencePair {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<SentencePair>;
+  return (
+    typeof candidate.id === 'string' && candidate.id.length > 0 && candidate.id.length <= 100 &&
+    typeof candidate.source === 'string' && candidate.source.length > 0 && candidate.source.length <= 6000 &&
+    typeof candidate.translated === 'string' && candidate.translated.trim().length > 0 && candidate.translated.length <= 12_000 &&
+    Number.isInteger(candidate.paragraphIndex) && candidate.paragraphIndex! >= 0 &&
+    Number.isInteger(candidate.sentenceIndex) && candidate.sentenceIndex! >= 0
   );
 }
