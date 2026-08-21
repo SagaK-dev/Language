@@ -189,7 +189,7 @@ Run a production build:
 npm run build
 ```
 
-CI uses `npm ci` and also runs `npm audit --audit-level=high` before tests and builds.
+The reviewed CI baseline currently contains 18 tests across five test files. CI uses `npm ci` and also runs `npm audit --audit-level=high` before tests and builds.
 
 ## Project structure
 
