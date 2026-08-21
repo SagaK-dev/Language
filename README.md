@@ -21,7 +21,7 @@ The project is designed for Cloudflare Pages. Translation provider secrets stay 
 - Redirect-by-redirect URL validation and blocking for common local/private address forms.
 - Same-origin browser request checks as defense in depth.
 - Strict browser security headers and no-store API responses.
-- OpenAI Structured Outputs for schema-constrained translation responses.
+- OpenAI Structured Outputs for schema-constrained translation responses, followed by server-side item-count validation.
 - Unit tests for sentence segmentation, mixing, history validation, translation-option validation, URL safety, and article extraction.
 - CI checks for dependency vulnerabilities, tests, frontend type safety, Pages Functions type safety, and production builds.
 - A committed npm lockfile and `npm ci` in CI for reproducible dependency resolution.
@@ -140,7 +140,7 @@ Response:
 }
 ```
 
-The server validates the language and style options independently of the UI. Text and optional context are treated as untrusted translation data, and the provider response must conform to the expected JSON schema and item count before it is returned to the browser.
+The server validates the language and style options independently of the UI. Text and optional context are treated as untrusted translation data. The provider response must match the expected structured JSON shape, and the server separately verifies that the number of returned translations exactly matches the number of input sentences before returning data to the browser.
 
 ## Article import
 
