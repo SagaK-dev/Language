@@ -54,9 +54,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const options = parseOptions(body.options);
   if (!options) return json({ error: 'Invalid translation options.' }, 400);
-  if (options.sourceLanguage === options.targetLanguage) {
-    return json({ error: 'Source and target language must differ.' }, 400);
-  }
 
   const instruction = [
     'You are a translation engine. Translate content only.',
@@ -159,10 +156,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 };
 
-function parseOptions(value: unknown): TranslationOptions | null {
+export function parseOptions(value: unknown): TranslationOptions | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<TranslationOptions>;
   if (!ALLOWED_LANGUAGES.has(candidate.sourceLanguage || '') || !ALLOWED_LANGUAGES.has(candidate.targetLanguage || '')) return null;
+  if (candidate.sourceLanguage === candidate.targetLanguage) return null;
   if (typeof candidate.context !== 'string' || candidate.context.length > 300) return null;
   if (!['neutral', 'female', 'male'].includes(candidate.speakerGender || '')) return null;
   if (!['natural', 'polite', 'casual'].includes(candidate.politeness || '')) return null;
