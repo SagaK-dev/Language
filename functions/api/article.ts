@@ -212,11 +212,13 @@ function extractTitle(html: string): string {
   return match ? stripTags(match[1]).trim() : '';
 }
 
-function extractReadableText(html: string): string {
+export function extractReadableText(html: string): string {
   let cleaned = html
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(script|style|noscript|svg|canvas|iframe|nav|footer|header|form)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<(br|\/p|\/div|\/article|\/section|\/li|\/h[1-6])\s*>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|article|section|h[1-6])\s*>/gi, '\n\n')
+    .replace(/<\/li\s*>/gi, '\n')
     .replace(/<[^>]+>/g, ' ');
 
   cleaned = decodeEntities(cleaned)
