@@ -18,6 +18,7 @@ The project is designed for Cloudflare Pages and keeps provider secrets on the s
 - Cloudflare Pages Functions backend so API keys never ship to the browser.
 - Basic request validation, URL filtering, security headers, and no-store API responses.
 - Unit tests for sentence segmentation and mixing behavior.
+- CI checks for dependency vulnerabilities, tests, frontend type safety, Pages Functions type safety, and production builds.
 
 ## Tech stack
 
@@ -124,11 +125,19 @@ Run unit tests:
 npm test
 ```
 
+Run all type checks:
+
+```bash
+npm run typecheck
+```
+
 Run a production build:
 
 ```bash
 npm run build
 ```
+
+CI also runs `npm audit --audit-level=high` before tests and builds.
 
 ## Project structure
 
@@ -157,6 +166,7 @@ Language/
 ├─ index.html
 ├─ package.json
 ├─ tsconfig.app.json
+├─ tsconfig.functions.json
 ├─ tsconfig.json
 ├─ tsconfig.node.json
 └─ vite.config.ts
