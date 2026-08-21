@@ -24,6 +24,7 @@ The project is designed for Cloudflare Pages. Translation provider secrets stay 
 - OpenAI Structured Outputs for schema-constrained translation responses.
 - Unit tests for sentence segmentation, mixing, history validation, translation-option validation, URL safety, and article extraction.
 - CI checks for dependency vulnerabilities, tests, frontend type safety, Pages Functions type safety, and production builds.
+- A committed npm lockfile and `npm ci` in CI for reproducible dependency resolution.
 
 ## Tech stack
 
@@ -36,11 +37,13 @@ The project is designed for Cloudflare Pages. Translation provider secrets stay 
 
 ## Local development
 
-Install dependencies:
+For a clean checkout, install the exact reviewed dependency graph:
 
 ```bash
-npm install
+npm ci
 ```
+
+Use `npm install` only when intentionally changing dependencies and commit the resulting `package-lock.json` update together with `package.json`.
 
 Start the Vite frontend:
 
@@ -186,7 +189,7 @@ Run a production build:
 npm run build
 ```
 
-CI also runs `npm audit --audit-level=high` before tests and builds.
+CI uses `npm ci` and also runs `npm audit --audit-level=high` before tests and builds.
 
 ## Project structure
 
@@ -217,6 +220,7 @@ Language/
 ├─ .env.example
 ├─ index.html
 ├─ package.json
+├─ package-lock.json
 ├─ tsconfig.app.json
 ├─ tsconfig.functions.json
 ├─ tsconfig.json
