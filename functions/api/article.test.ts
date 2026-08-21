@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedPublicUrl, isBlockedHostname } from './article';
+import { extractReadableText, isAllowedPublicUrl, isBlockedHostname } from './article';
 
 describe('article URL validation', () => {
   it('allows normal public web URLs', () => {
@@ -26,5 +26,17 @@ describe('article URL validation', () => {
     expect(isAllowedPublicUrl(new URL('https://user:pass@example.com/'))).toBe(false);
     expect(isAllowedPublicUrl(new URL('https://example.com:8443/'))).toBe(false);
     expect(isAllowedPublicUrl(new URL('file:///tmp/example.html'))).toBe(false);
+  });
+});
+
+describe('article text extraction', () => {
+  it('preserves block paragraphs while retaining inline breaks', () => {
+    const text = extractReadableText('<article><p>First line<br>second line.</p><p>Next paragraph.</p></article>');
+    expect(text).toBe('First line\nsecond line.\n\nNext paragraph.');
+  });
+
+  it('removes script and navigation content', () => {
+    const text = extractReadableText('<nav>menu</nav><p>Readable.</p><script>alert(1)</script>');
+    expect(text).toBe('Readable.');
   });
 });
